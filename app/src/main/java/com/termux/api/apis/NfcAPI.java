@@ -22,7 +22,6 @@ import android.nfc.tech.TagTechnology;
 import android.os.Bundle;
 import android.util.JsonWriter;
 import android.view.View;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -276,7 +275,6 @@ public class NfcAPI {
         }
 
         private CallResult callQuit() {
-            Toast.makeText(this, "callQuit", Toast.LENGTH_SHORT).show();
             finish();
             return CallResult.success();
         }
@@ -835,9 +833,7 @@ public class NfcAPI {
 
         private CallResult callIsoDepTransceive(@NonNull byte[] requestData) throws NfcException, IOException, IllegalStateException {
             @NonNull IsoDep isoDep = Utils.liftTagTechnology(mTechnology, IsoDep.class);
-            Toast.makeText(this, "start transceive", Toast.LENGTH_SHORT).show();
             @NonNull byte[] response = isoDep.transceive(requestData);
-            Toast.makeText(this, "stop transceive", Toast.LENGTH_SHORT).show();
             return CallResult.successWithHex(response);
         }
         // end of wrapper for IsoDep::transceive
@@ -1808,7 +1804,7 @@ public class NfcAPI {
 
         }
 
-        TagTechnologyClosure parseClosureFromIntent(intent intent) throws ArgumentException {
+        TagTechnologyClosure parseClosureFromIntent(Intent intent) throws ArgumentException {
             @NonNull String[] args = Utils.collectNumberedArgs(intent, "arg");
             return parseClosureFromArgs(args);
         }
@@ -1828,8 +1824,6 @@ public class NfcAPI {
                 return;
             }
 
-            Toast.makeText(this, "NfcAPI.onCreate!@", Toast.LENGTH_SHORT).show();
-
             assert intent.hasExtra("socket_input");
             assert intent.hasExtra("socket_output");
 
@@ -1838,7 +1832,6 @@ public class NfcAPI {
             }
             catch (ArgumentException e) {
                 postException(e);
-                Toast.makeText(this, "NfcAPI.onCreate argumentException", Toast.LENGTH_SHORT).show();
                 finish();
                 return;
             }
@@ -1850,7 +1843,6 @@ public class NfcAPI {
             NfcAdapter adapter = NfcAdapter.getDefaultAdapter(this);
             if (adapter == null || !adapter.isEnabled()) {
                 postException(new NfcUnavailableException());
-                Toast.makeText(this, "NfcAPI.onCreate adapter unavailable", Toast.LENGTH_SHORT).show();
                 finish();
                 return;
             }
@@ -1892,30 +1884,16 @@ public class NfcAPI {
         protected void onNewIntent(Intent intent) {
             Logger.logDebug(LOG_TAG, "onNewIntent");
             super.onNewIntent(intent);
-            Toast.makeText(this, "onNewIntent very begin", Toast.LENGTH_SHORT).show();
 
             if (isFinishing()) {
                 postException(new ActivityFinishingException());
                 return;
             }
 
-            // first intent: onCreate -> onResume -> onNewIntent(tag) & doDelayedWork
-            // later intents (including connect, except tag discovery): onNewIntent
-
-            // if intent is to connect, but no tag has been saved,
-            // then this intent must have been raced between the first
-
-
-//            intent.putExtra("socket_input", socket_input);
-//            intent.putExtra("socket_output", socket_output);
-
             String action = intent.getAction();
             if (NfcAdapter.ACTION_TAG_DISCOVERED.equals(action)
                     || NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)
                     || NfcAdapter.ACTION_TECH_DISCOVERED.equals(action)) {
-                Toast.makeText(this, "tag discovered", Toast.LENGTH_SHORT).show();
-                // only after this will the commands (except close) be processed
-                // there are at most one
                 Tag tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
 
                 assert tag != null;
@@ -1926,18 +1904,9 @@ public class NfcAPI {
                 return;
             }
 
-            Toast.makeText(this, "other intents", Toast.LENGTH_SHORT).show();
-            boolean socket_presence_equal = intent.hasExtra("socket_input") == intent.hasExtra("socket_output");
-            boolean socket_presence = intent.hasExtra("socket_input");
-            Toast.makeText(this, "presence="+(socket_presence?"true":"false")+",equal="+(socket_presence_equal?"true":"false"), Toast.LENGTH_SHORT).show();
             assert intent.hasExtra("socket_input");
             assert intent.hasExtra("socket_output");
-            if (!intent.hasExtra("socket_input")) {
-                Toast.makeText(this, "intent no socket: " + intent.getStringExtra("arg1"), Toast.LENGTH_SHORT).show();
-                ResultReturner.copyIntentExtras(getIntent(), intent);
-            }
-            assert intent.hasExtra("socket_input");
-            assert intent.hasExtra("socket_output");
+
             setIntent(intent);
             TagTechnologyClosure closure;
             try {
@@ -1946,7 +1915,6 @@ public class NfcAPI {
                 postException(e);
                 return;
             }
-            Toast.makeText(this, "invoking other intents", Toast.LENGTH_SHORT).show();
             invokeClosure(closure);
         }
 
@@ -1960,7 +1928,6 @@ public class NfcAPI {
         @Override
         protected void onDestroy() {
             Logger.logDebug(LOG_TAG, "onDestroy");
-            Toast.makeText(this, "NfcAPI.onDestroy, finishing=" + (isFinishing() ? "true" : "false"), Toast.LENGTH_SHORT).show();
             super.onDestroy();
         }
 
@@ -1976,11 +1943,11 @@ public class NfcAPI {
                     if (obj == null) {
                         resultWriter.nullValue();
                     } else if (obj instanceof String) {
-                        out.name("result").value((String)obj);
+                        resultWriter.value((String)obj);
                     } else if (obj instanceof Integer) {
-                        out.name("result").value((Integer)obj);
+                        resultWriter.value((Integer)obj);
                     } else if (obj instanceof Boolean) {
-                        out.name("result").value((Boolean)obj);
+                        resultWriter.value((Boolean)obj);
                     } else {
                         assert false : "invalid result type: " + obj.getClass().getName();
                     }

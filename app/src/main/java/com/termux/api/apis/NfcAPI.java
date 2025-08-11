@@ -36,18 +36,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-// - [x] handle race condition of finish() by Activity.isFinishing()
-// inside onNewIntent, first check isFinishing(). If true, immediately quit with exception
-
-// close() finishes the activity
-
-// intent of close() before started? Yes, onCreate and then immediately finish()
-// so, special treatment for close()
-
-// connect(): delayed after tag discovery
-// before that, connect() is not finished, so no further command is supposed to appear
-// in case it appear, no tag, so return exception as it should
-
 class NfcException extends RuntimeException {
     NfcException() {
 
@@ -57,11 +45,7 @@ class NfcException extends RuntimeException {
         super(message);
     }
 }
-class UnexpectedException extends NfcException {
-    UnexpectedException(String message) {
-        super(message);
-    }
-}
+
 class UnsupportedTechnology extends NfcException {}
 class NoConnectionException extends NfcException {}
 class WrongTechnologyException extends NfcException {
@@ -143,14 +127,20 @@ class Utils {
         return (byte)((parseHexOne(high) << 4) | parseHexOne(low));
     }
 
-    static byte[] parseHex(@NonNull String s) throws ArgumentException {
-        if (s.length()%2 != 0 || s.isEmpty()) {
+    /**
+     * Parse hex representation of byte[] array.
+     * @param hex the hex representation, e.g. "DEADBEEF"
+     * @return the byte[] array, e.g. {0xde, 0xad, 0xbe, 0xef}.
+     * @throws ArgumentException if it fails to parse.
+     */
+    static byte[] parseHex(@NonNull String hex) throws ArgumentException {
+        if (hex.length()%2 != 0 || hex.isEmpty()) {
             throw new InvalidHexLengthException();
         }
 
-        byte[] result = new byte[s.length()/2];
-        for (int i=0; i<s.length(); i+=2) {
-            result[i/2] = parseHexTwo(s.charAt(i), s.charAt(i+1));
+        byte[] result = new byte[hex.length()/2];
+        for (int i=0; i<hex.length(); i+=2) {
+            result[i/2] = parseHexTwo(hex.charAt(i), hex.charAt(i+1));
         }
 
         return result;
@@ -169,6 +159,11 @@ class Utils {
         return String.format("%02X", b);
     }
 
+    /**
+     * Format byte array into hex string, e.g. {0xde, 0xad, 0xbe, 0xef} -> "DEADBEEF"
+     * @param data the byte array to be formatted
+     * @return the formatted hex representation
+     */
     static String formatHex(@NonNull byte[] data) {
         StringBuilder sb = new StringBuilder();
         for (byte b: data) {
@@ -177,19 +172,16 @@ class Utils {
         return sb.toString();
     }
 
-    static boolean isArrayPrefix(@NonNull String[] full, @NonNull String[] prefix) {
-        if (full.length < prefix.length)
-            return false;
 
-        for (int i=0; i<prefix.length; ++i) {
-            if (!full[i].equals(prefix[i])) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
+    /**
+     * Collect "arg1" "arg2" "arg3" ... from intent extras,
+     * where the prefix "arg" can be specified.
+     *
+     * @param intent the intent
+     * @param argPrefix the prefix, usually "arg"
+     *
+     * @return collected arguments
+     */
     static String[] collectNumberedArgs(Intent intent, @NonNull String argPrefix) {
         List<String> result = new ArrayList<>();
 
@@ -206,6 +198,9 @@ class Utils {
     }
 }
 
+/**
+ * Return value of wrapped NFC API call.
+ */
 class CallResult {
     @Nullable Object mData;
 
@@ -234,8 +229,10 @@ class CallResult {
     }
 }
 
+/**
+ * Single abstract method for NFC API invocation.
+ */
 interface TagTechnologyClosure {
-    // return true if finish activity
     CallResult call() throws IOException, android.nfc.FormatException, NfcException;
 }
 
@@ -257,12 +254,16 @@ public class NfcAPI {
 
 
     public static class NfcActivity extends AppCompatActivity {
+        // Closure for the first API call that is delayed after the discovery of tag.
         private TagTechnologyClosure mDelayedClosure;
-        private TagTechnology mTechnology;
+
+        // The result of connect()
+        private @Nullable TagTechnology mTechnology;
+
+        // The last discovered tag
         private Tag mTag;
+
         private NfcAdapter mAdapter;
-//        static String socket_input;
-//        static String socket_output;
 
         private static final String LOG_TAG = "NfcActivity";
 
@@ -281,18 +282,8 @@ public class NfcAPI {
         // end of wrapper for quit
 
         // start of wrappers for abstract class TagTechnology
+        // doc: https://developer.android.com/reference/android/nfc/tech/TagTechnology
         final static String CLASS_NAME_TAG_TECHNOLOGY = "TagTechnology";
-
-        // helper function for subclasses' connect()
-        private <T extends TagTechnology> CallResult callTagTechnologyConnect(Function<Tag, T> tagGetter) throws IOException {
-            Utils.checkTagNonNull(mTag);
-            mTechnology = tagGetter.apply(mTag);
-            if (mTechnology == null) {
-                throw new UnsupportedTechnology();
-            }
-            mTechnology.connect();
-            return CallResult.success();
-        }
 
         // start of wrapper for TagTechnology::isConnected
         private final static String METHOD_NAME_TAG_TECHNOLOGY_IS_CONNECTED = "isConnected";
@@ -340,6 +331,7 @@ public class NfcAPI {
         // end of wrappers for abstract class TagTechnology
 
         // start of wrappers for class NfcA
+        // doc: https://developer.android.com/reference/android/nfc/tech/NfcA
         private static final String CLASS_NAME_NFC_A = "NfcA";
 
         // start of wrapper for NfcA::connect
@@ -449,6 +441,7 @@ public class NfcAPI {
         // end of wrappers for class NfcA
 
         // start of wrappers for class NfcB
+        // doc: https://developer.android.com/reference/android/nfc/tech/NfcB
         private static final String CLASS_NAME_NFC_B = "NfcB";
 
         // start of wrapper for NfcB::connect
@@ -527,6 +520,7 @@ public class NfcAPI {
         // end of wrappers for class NfcB
 
         // start of wrappers for class NfcF
+        // doc: https://developer.android.com/reference/android/nfc/tech/NfcF
         private static final String CLASS_NAME_NFC_F = "NfcF";
 
         // start of wrapper for NfcF::connect
@@ -636,6 +630,7 @@ public class NfcAPI {
         // end of wrappers for class NfcF
 
         // start of wrappers for class NfcV
+        // doc: https://developer.android.com/reference/android/nfc/tech/NfcV
         private static final String CLASS_NAME_NFC_V = "NfcV";
 
         // start of wrapper for NfcV::connect
@@ -714,6 +709,7 @@ public class NfcAPI {
         // end of wrappers for class NfcV
 
         // start of wrappers for class IsoDep
+        // doc: https://developer.android.com/reference/android/nfc/tech/IsoDep
         private static final String CLASS_NAME_ISO_DEP = "IsoDep";
 
         // start of wrapper for IsoDep::connect
@@ -840,6 +836,7 @@ public class NfcAPI {
         // end of wrappers for class IsoDep
 
         // start of wrappers for class Ndef
+        // doc: https://developer.android.com/reference/android/nfc/tech/Ndef
         private static final String CLASS_NAME_NDEF = "Ndef";
 
         // start of wrapper for Ndef::connect
@@ -978,9 +975,9 @@ public class NfcAPI {
         // end of wrappers for class Ndef
 
         // start of wrappers for class MifareClassic
+        // doc: https://developer.android.com/reference/android/nfc/tech/MifareClassic
         private final static String CLASS_NAME_MIFARE_CLASSIC = "MifareClassic";
 
-        // start of wrappers for class MifareClassic
         // start of wrapper for MifareClassic::authenticateSectorWithKeyA
         private final static String METHOD_NAME_MIFARE_CLASSIC_AUTHENTICATE_SECTOR_WITH_KEY_A = "authenticateSectorWithKeyA";
 
@@ -1300,7 +1297,7 @@ public class NfcAPI {
         // end of wrappers for class MifareClassic
 
         // start of wrappers for class MifareUltralight
-        // MifareUltralight docs: https://developer.android.com/reference/android/nfc/tech/MifareUltralight
+        // doc: https://developer.android.com/reference/android/nfc/tech/MifareUltralight
 
         private final static String CLASS_NAME_MIFARE_ULTRALIGHT = "MifareUltralight";
 
@@ -1430,6 +1427,7 @@ public class NfcAPI {
 
 
         // start of wrappers for class NfcBarcode
+        // doc: https://developer.android.com/reference/android/nfc/tech/NfcBarcode
         private final static String CLASS_NAME_NFC_BARCODE = "NfcBarcode";
 
         // start of wrapper for NfcBarcode::connect (inherited from TagTechnology)
@@ -1477,6 +1475,7 @@ public class NfcAPI {
         // end of wrappers for class NfcBarcode
 
         // start of wrappers for class NdefFormatable
+        // doc: https://developer.android.com/reference/android/nfc/tech/NdefFormatable
         private final static String CLASS_NAME_NDEF_FORMATABLE = "NdefFormatable";
 
         // start of wrapper for NdefFormatable::connect (inherited from TagTechnology)
@@ -1524,6 +1523,18 @@ public class NfcAPI {
         }
         // end of wrapper for NdefFormatable::formatReadOnly
         // end of wrappers for class NdefFormatable
+
+        // helper function for subclasses' connect()
+        private <T extends TagTechnology> CallResult callTagTechnologyConnect(Function<Tag, T> tagGetter) throws IOException {
+            Utils.checkTagNonNull(mTag);
+            mTechnology = tagGetter.apply(mTag);
+            if (mTechnology == null) {
+                throw new UnsupportedTechnology();
+            }
+            mTechnology.connect();
+            return CallResult.success();
+        }
+
         TagTechnologyClosure parseClosureFromArgs(@NonNull String[] args) throws ArgumentException {
             if (args.length == 0) {
                 throw new InvalidCommandException();
@@ -1813,12 +1824,9 @@ public class NfcAPI {
         @Override
         protected void onCreate(@Nullable Bundle savedInstanceState) {
             Logger.logDebug(LOG_TAG, "onCreate");
-
             super.onCreate(savedInstanceState);
-            setContentView(new View(this));
 
             Intent intent = this.getIntent();
-
             if (intent == null) {
                 finish();
                 return;
@@ -1835,10 +1843,6 @@ public class NfcAPI {
                 finish();
                 return;
             }
-
-
-//            if (null == socket_input) socket_input = intent.getStringExtra("socket_input");
-//            if (null == socket_output) socket_output = intent.getStringExtra("socket_output");
 
             NfcAdapter adapter = NfcAdapter.getDefaultAdapter(this);
             if (adapter == null || !adapter.isEnabled()) {
@@ -1949,7 +1953,7 @@ public class NfcAPI {
                     } else if (obj instanceof Boolean) {
                         resultWriter.value((Boolean)obj);
                     } else {
-                        assert false : "invalid result type: " + obj.getClass().getName();
+                        assert false : "Unexpected invalid result type: " + obj.getClass().getName();
                     }
                     
                     out.endObject();

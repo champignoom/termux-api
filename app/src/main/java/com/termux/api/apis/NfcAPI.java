@@ -5,6 +5,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.nfc.FormatException;
 import android.nfc.NdefMessage;
@@ -356,7 +357,7 @@ public class NfcAPI {
             return this::callNfcAConnect;
         }
 
-        private CallResult callNfcAConnect() throws IOException, InterruptedException {
+        private CallResult callNfcAConnect() throws IOException {
             return callTagTechnologyConnect(NfcA::get);
         }
         // end of wrapper for NfcA::connect
@@ -466,7 +467,7 @@ public class NfcAPI {
             return this::callNfcBConnect;
         }
 
-        private CallResult callNfcBConnect() throws IOException, InterruptedException {
+        private CallResult callNfcBConnect() throws IOException {
             return callTagTechnologyConnect(NfcB::get);
         }
         // end of wrapper for NfcB::connect
@@ -545,7 +546,7 @@ public class NfcAPI {
             return this::callNfcFConnect;
         }
 
-        private CallResult callNfcFConnect() throws IOException, InterruptedException {
+        private CallResult callNfcFConnect() throws IOException {
             return callTagTechnologyConnect(NfcF::get);
         }
         // end of wrapper for NfcF::connect
@@ -655,7 +656,7 @@ public class NfcAPI {
             return this::callNfcVConnect;
         }
 
-        private CallResult callNfcVConnect() throws IOException, InterruptedException {
+        private CallResult callNfcVConnect() throws IOException {
             return callTagTechnologyConnect(NfcV::get);
         }
         // end of wrapper for NfcV::connect
@@ -734,7 +735,7 @@ public class NfcAPI {
             return this::callIsoDepConnect;
         }
 
-        private CallResult callIsoDepConnect() throws IOException, InterruptedException {
+        private CallResult callIsoDepConnect() throws IOException {
             return callTagTechnologyConnect(IsoDep::get);
         }
         // end of wrapper for IsoDep::connect
@@ -861,7 +862,7 @@ public class NfcAPI {
             return this::callNdefConnect;
         }
 
-        private CallResult callNdefConnect() throws IOException, InterruptedException {
+        private CallResult callNdefConnect() throws IOException {
             return callTagTechnologyConnect(Ndef::get);
         }
         // end of wrapper for Ndef::connect
@@ -1050,7 +1051,7 @@ public class NfcAPI {
             return this::callMifareClassicConnect;
         }
 
-        private CallResult callMifareClassicConnect() throws IOException, InterruptedException {
+        private CallResult callMifareClassicConnect() throws IOException {
             return callTagTechnologyConnect(MifareClassic::get);
         }
         // end of wrapper for MifareClassic::connect
@@ -1323,7 +1324,7 @@ public class NfcAPI {
             return this::callMifareUltralightConnect;
         }
 
-        private CallResult callMifareUltralightConnect() throws IOException, InterruptedException {
+        private CallResult callMifareUltralightConnect() throws IOException {
             return callTagTechnologyConnect(MifareUltralight::get);
         }
         // end of wrapper for MifareUltralight::connect
@@ -1452,7 +1453,7 @@ public class NfcAPI {
             return this::callNfcBarcodeConnect;
         }
 
-        private CallResult callNfcBarcodeConnect() throws IOException, InterruptedException {
+        private CallResult callNfcBarcodeConnect() throws IOException {
             return callTagTechnologyConnect(NfcBarcode::get);
         }
         // end of wrapper for NfcBarcode::connect
@@ -1500,7 +1501,7 @@ public class NfcAPI {
             return this::callNdefFormatableConnect;
         }
 
-        private CallResult callNdefFormatableConnect() throws IOException, InterruptedException {
+        private CallResult callNdefFormatableConnect() throws IOException {
             return callTagTechnologyConnect(NdefFormatable::get);
         }
         // end of wrapper for NdefFormatable::connect
@@ -1539,7 +1540,19 @@ public class NfcAPI {
         // end of wrappers for class NdefFormatable
 
         // helper function for subclasses' connect()
-        private <T extends TagTechnology> CallResult callTagTechnologyConnect(Function<Tag, T> tagGetter) throws IOException, InterruptedException {
+        private <T extends TagTechnology> CallResult callTagTechnologyConnect(Function<Tag, T> tagGetter) throws IOException {
+            if (mTag == null) {
+                throw new TagNullException();
+            }
+            mTechnology = tagGetter.apply(mTag);
+            if (mTechnology == null) {
+                throw new UnsupportedTechnology();
+            }
+            mTechnology.connect();
+            return CallResult.success();
+        }
+
+        private CallResult discoverTag() throws InterruptedException {
             clearTag();
 
             Intent intent = new Intent(mActivity, NfcActivity.class);
@@ -1549,11 +1562,6 @@ public class NfcAPI {
             mTagSemaphore.acquire();
             assert mTag != null;
 
-            mTechnology = tagGetter.apply(mTag);
-            if (mTechnology == null) {
-                throw new UnsupportedTechnology();
-            }
-            mTechnology.connect();
             mActivity.runOnUiThread(() -> mActivity.moveTaskToBack(true));
             return CallResult.success();
         }
@@ -1798,18 +1806,40 @@ public class NfcAPI {
             }
         }
 
+        private final String JSON_KEY_OP_NAME = "op";
+        private final String JSON_VALUE_OP_API = "api";
+        private final String JSON_VALUE_OP_DISCOVER_TAG = "discoverTag";
         private final String JSON_KEY_CLASS_NAME = "class";
         private final String JSON_KEY_METHOD_NAME = "method";
         private final String JSON_KEY_ARGS = "args";
 
         TagTechnologyClosure parseClosureFromLine(@NonNull String line) throws ArgumentException {
             JSONObject jsonObject;
+            String operationName;
+
+            try {
+                jsonObject = new JSONObject(line);
+                operationName = jsonObject.getString(JSON_KEY_OP_NAME);
+            } catch (JSONException e) {
+                throw new ArgumentException(e.getMessage());
+            }
+
+            switch (operationName) {
+                case JSON_VALUE_OP_DISCOVER_TAG:
+                    return this::discoverTag;
+                case JSON_VALUE_OP_API:
+                    return parseClosureFromJsonApi(jsonObject);
+                default:
+                    throw new InvalidCommandException();
+            }
+        }
+
+        TagTechnologyClosure parseClosureFromJsonApi(@NonNull JSONObject jsonObject) throws ArgumentException {
             String className;
             String methodName;
             String[] args;
 
             try {
-                jsonObject = new JSONObject(line);
                 className = jsonObject.getString(JSON_KEY_CLASS_NAME);
                 methodName = jsonObject.getString(JSON_KEY_METHOD_NAME);
                 JSONArray jsonArray = jsonObject.getJSONArray(JSON_KEY_ARGS);
@@ -1882,7 +1912,9 @@ public class NfcAPI {
             View view = new View(this);
             Drawable drawable = AppCompatResources.getDrawable(this, R.drawable.ic_nfc_black_24dp);
             view.setBackground(drawable);
+            getWindow().getDecorView().setBackgroundColor(Color.argb(128, 255, 255, 255));
             setContentView(view);
+            moveTaskToBack(true);
 
             Intent intent = this.getIntent();
             if (intent == null) {
@@ -1901,8 +1933,6 @@ public class NfcAPI {
 
             mNfcManager = new NfcManager(this, intent);
             mNfcManager.listenAsync();
-
-            moveTaskToBack(true);
         }
 
         @Override

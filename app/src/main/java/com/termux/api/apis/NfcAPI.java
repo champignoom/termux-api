@@ -1,10 +1,11 @@
 package com.termux.api.apis;
 
+import android.app.Activity;
 import android.app.PendingIntent;
-import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.drawable.Drawable;
 import android.nfc.FormatException;
 import android.nfc.NdefMessage;
 import android.nfc.NfcAdapter;
@@ -21,15 +22,15 @@ import android.nfc.tech.NfcF;
 import android.nfc.tech.NfcV;
 import android.nfc.tech.TagTechnology;
 import android.os.Bundle;
-import android.os.IBinder;
 import android.view.View;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.content.res.AppCompatResources;
 import androidx.core.util.Function;
 
+import com.termux.api.R;
 import com.termux.api.util.PendingIntentUtils;
 import com.termux.api.util.ResultReturner;
 import com.termux.shared.logger.Logger;
@@ -42,9 +43,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.Semaphore;
 
 class NfcException extends RuntimeException {
@@ -67,12 +65,6 @@ class WrongTechnologyException extends NfcException {
     WrongTechnologyException(@NonNull String expected, @NonNull String found) {
         super(String.format("%s expected, but %s found", expected, found));
     }
-}
-
-class NfcUnavailableException extends NfcException {
-}
-
-class ActivityFinishingException extends NfcException {
 }
 
 class TagNullException extends NfcException {
@@ -107,6 +99,7 @@ class InvalidCommandException extends ArgumentException {
 }
 
 class Utils {
+
     static void printLnFlush(PrintWriter out, @NonNull String s) {
         out.println(s);
         out.flush();
@@ -221,30 +214,6 @@ class Utils {
         }
         return sb.toString();
     }
-
-
-    /**
-     * Collect "arg1" "arg2" "arg3" ... from intent extras,
-     * where the prefix "arg" can be specified.
-     *
-     * @param intent    the intent
-     * @param argPrefix the prefix, usually "arg"
-     * @return collected arguments
-     */
-    static String[] collectNumberedArgs(Intent intent, @NonNull String argPrefix) {
-        List<String> result = new ArrayList<>();
-
-        for (int index = 1; true; ++index) {
-            String argName = argPrefix + index;
-            String argValue = intent.getStringExtra(argName);
-            if (argValue == null) {
-                break;
-            }
-            result.add(argValue);
-        }
-
-        return result.toArray(new String[0]);
-    }
 }
 
 /**
@@ -314,29 +283,17 @@ public class NfcAPI {
         context.startActivity(newIntent);
     }
 
-    public static class NfcService extends Service {
-        @Override
-        public void onCreate() {
-
-        }
-
-        @Override
-        public IBinder onBind(Intent intent) {
-            return null;
-        }
-    }
-
     static class NfcManager {
         // The result of connect()
         private @Nullable TagTechnology mTechnology;
 
         // The last discovered tag
         private Tag mTag;
-        private Semaphore mTagSemaphore;
+        private final Semaphore mTagSemaphore;
 
-        private Context mContext;
-        private NfcAdapter mAdapter;
-        private Intent mIntent;
+        private final Activity mActivity;
+
+        private final Intent mIntent;
 
         // start of wrappers for abstract class TagTechnology
         // doc: https://developer.android.com/reference/android/nfc/tech/TagTechnology
@@ -1581,19 +1538,23 @@ public class NfcAPI {
         // end of wrapper for NdefFormatable::formatReadOnly
         // end of wrappers for class NdefFormatable
 
-        private final static String STDIN_MARK = "-";
-
-        // end of wrapper for stdin listener
-
         // helper function for subclasses' connect()
         private <T extends TagTechnology> CallResult callTagTechnologyConnect(Function<Tag, T> tagGetter) throws IOException, InterruptedException {
+            clearTag();
+
+            Intent intent = new Intent(mActivity, NfcActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            mActivity.startActivity(intent);
+
             mTagSemaphore.acquire();
             assert mTag != null;
+
             mTechnology = tagGetter.apply(mTag);
             if (mTechnology == null) {
                 throw new UnsupportedTechnology();
             }
             mTechnology.connect();
+            mActivity.runOnUiThread(() -> mActivity.moveTaskToBack(true));
             return CallResult.success();
         }
 
@@ -1642,6 +1603,7 @@ public class NfcAPI {
                         case METHOD_NAME_NFC_B_GET_MAX_TRANSCEIVE_LENGTH:
                             return parseArgsNfcBGetMaxTransceiveLength(args);
                         case METHOD_NAME_NFC_B_GET_PROTOCOL_INFO:
+                            return parseArgsNfcBGetProtocolInfo(args);
                         case METHOD_NAME_NFC_B_TRANSCEIVE:
                             return parseArgsNfcBTransceive(args);
                         default:
@@ -1859,29 +1821,14 @@ public class NfcAPI {
             return parseClosureFromClassMethodArgs(className, methodName, args);
         }
 
-
-        TagTechnologyClosure parseClosureFromArgs(@NonNull String[] args) throws ArgumentException {
-            if (args.length < 2) {
-                throw new InvalidCommandException();
-            }
-
-            return parseClosureFromClassMethodArgs(args[0], args[1], Arrays.copyOfRange(args, 2, args.length));
-        }
-
-        TagTechnologyClosure parseClosureFromIntent(Intent intent) throws ArgumentException {
-            @NonNull String[] args = Utils.collectNumberedArgs(intent, "arg");
-            return parseClosureFromArgs(args);
-        }
-
-        NfcManager(Context context, NfcAdapter nfcAdapter, Intent intent) {
-            mContext = context;
-            mAdapter = nfcAdapter;
+        NfcManager(Activity activity, Intent intent) {
+            mActivity = activity;
             mIntent = intent;
             mTagSemaphore = new Semaphore(0);
         }
 
         void listenAsync() {
-            ResultReturner.returnData(mContext, mIntent, new ResultReturner.WithInput() {
+            ResultReturner.returnData(mActivity, mIntent, new ResultReturner.WithInput() {
                 @Override
                 public void writeResult(PrintWriter out) throws Exception {
                     BufferedReader reader = new BufferedReader(new InputStreamReader(in));
@@ -1905,13 +1852,20 @@ public class NfcAPI {
 
                         Utils.printLnFlush(out, result.toJson().toString());
                     }
+
+                    mActivity.runOnUiThread(mActivity::finishAndRemoveTask);
                 }
             });
         }
 
-        private void setTag(@NonNull Tag tag) {
+        private synchronized void setTag(@NonNull Tag tag) {
             mTag = tag;
             mTagSemaphore.release();
+        }
+
+        private synchronized void clearTag() {
+            mTag = null;
+            mTagSemaphore.drainPermits();
         }
     }
 
@@ -1920,18 +1874,14 @@ public class NfcAPI {
         NfcManager mNfcManager;
         NfcAdapter mAdapter;
 
-        private void showToast(String msg) {
-            runOnUiThread(() -> {
-                Toast.makeText(NfcActivity.this, msg, Toast.LENGTH_SHORT).show();
-            });
-        }
-
         @Override
         protected void onCreate(@Nullable Bundle savedInstanceState) {
             Logger.logDebug(LOG_TAG, "onCreate");
             super.onCreate(savedInstanceState);
 
             View view = new View(this);
+            Drawable drawable = AppCompatResources.getDrawable(this, R.drawable.ic_nfc_black_24dp);
+            view.setBackground(drawable);
             setContentView(view);
 
             Intent intent = this.getIntent();
@@ -1949,8 +1899,10 @@ public class NfcAPI {
                 return;
             }
 
-            mNfcManager = new NfcManager(this, mAdapter, intent);
+            mNfcManager = new NfcManager(this, intent);
             mNfcManager.listenAsync();
+
+            moveTaskToBack(true);
         }
 
         @Override
@@ -1979,7 +1931,6 @@ public class NfcAPI {
                     || NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)
                     || NfcAdapter.ACTION_TECH_DISCOVERED.equals(action)) {
                 Tag tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
-
                 assert tag != null;
                 mNfcManager.setTag(tag);
                 return;
